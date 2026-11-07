@@ -1,0 +1,19 @@
+# Compiled binaries
+/qcache
+/qcache-*
+
+# Test artifacts
+*.test
+coverage.out
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
