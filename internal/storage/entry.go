@@ -6,6 +6,7 @@ import "time"
 type entry struct {
 	value     []byte
 	expiresAt time.Time
+	version   uint64
 }
 
 // Checks whether an entry has expired.

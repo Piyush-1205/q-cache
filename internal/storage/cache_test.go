@@ -8,8 +8,19 @@ import (
 	"time"
 )
 
-func TestSetAndGet(t *testing.T) {
+func newTestCache(t *testing.T) *Cache {
+	t.Helper()
+
 	cache := New()
+
+	t.Cleanup(func() {
+		cache.Close()
+	})
+
+	return cache
+}
+func TestSetAndGet(t *testing.T) {
+	cache := newTestCache(t)
 
 	err := cache.Set("user:1", []byte("Piyush"))
 	if err != nil {
@@ -28,7 +39,7 @@ func TestSetAndGet(t *testing.T) {
 }
 
 func TestMissingKey(t *testing.T) {
-	cache := New()
+	cache := newTestCache(t)
 
 	_, exists := cache.Get("user:999")
 
@@ -38,7 +49,7 @@ func TestMissingKey(t *testing.T) {
 }
 
 func TestEmptyKey(t *testing.T) {
-	cache := New()
+	cache := newTestCache(t)
 
 	err := cache.Set("", []byte("Piyush"))
 
@@ -48,7 +59,7 @@ func TestEmptyKey(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
-	cache := New()
+	cache := newTestCache(t)
 
 	cache.Set("user:1", []byte("Piyush"))
 
@@ -64,7 +75,7 @@ func TestDelete(t *testing.T) {
 }
 
 func TestValuesAreCopied(t *testing.T) {
-	cache := New()
+	cache := newTestCache(t)
 
 	original := []byte("Piyush")
 
@@ -88,7 +99,7 @@ func TestValuesAreCopied(t *testing.T) {
 }
 
 func TestConcurrentAccess(t *testing.T) {
-	cache := New()
+	cache := newTestCache(t)
 
 	var wg sync.WaitGroup
 
@@ -124,7 +135,7 @@ func TestConcurrentAccess(t *testing.T) {
 
 func TestSetWithTTL(t *testing.T) {
 
-	cache := New()
+	cache := newTestCache(t)
 
 	err := cache.SetWithTTL(
 		"session:1",
@@ -149,7 +160,7 @@ func TestSetWithTTL(t *testing.T) {
 
 func TestExpiredKey(t *testing.T) {
 
-	cache := New()
+	cache := newTestCache(t)
 
 	err := cache.SetWithTTL(
 		"session:1",
@@ -176,7 +187,7 @@ func TestExpiredKey(t *testing.T) {
 
 func TestExistsForExpiredKey(t *testing.T) {
 
-	cache := New()
+	cache := newTestCache(t)
 
 	err := cache.SetWithTTL(
 		"session:1",
@@ -197,7 +208,7 @@ func TestExistsForExpiredKey(t *testing.T) {
 
 func TestSetReplacesPreviousTTL(t *testing.T) {
 
-	cache := New()
+	cache := newTestCache(t)
 
 	err := cache.SetWithTTL(
 		"session:1",
@@ -231,7 +242,7 @@ func TestSetReplacesPreviousTTL(t *testing.T) {
 
 func TestInvalidTTL(t *testing.T) {
 
-	cache := New()
+	cache := newTestCache(t)
 
 	invalidTTLs := []time.Duration{
 		0,
@@ -253,5 +264,72 @@ func TestInvalidTTL(t *testing.T) {
 				err,
 			)
 		}
+	}
+}
+
+func TestActiveExpirationRemovesUnaccessedKey(t *testing.T) {
+
+	cache := newTestCache(t)
+
+	err := cache.SetWithTTL(
+		"session:1",
+		[]byte("Piyush"),
+		50*time.Millisecond,
+	)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+
+	// Do not call Get or Exists here.
+	// Only check whether the background worker removed the entry.
+	for cache.Len() != 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if cache.Len() != 0 {
+		t.Fatal("Background worker did not remove expired entry")
+	}
+}
+
+func TestUpdatedTTLDoesNotExpireEarly(t *testing.T) {
+
+	cache := newTestCache(t)
+
+	err := cache.SetWithTTL(
+		"session:1",
+		[]byte("Old"),
+		50*time.Millisecond,
+	)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	// Replace with a new value and longer TTL.
+	err = cache.SetWithTTL(
+		"session:1",
+		[]byte("New"),
+		500*time.Millisecond,
+	)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	value, exists := cache.Get("session:1")
+
+	if !exists {
+		t.Fatal("Updated key was incorrectly expired")
+	}
+
+	if string(value) != "New" {
+		t.Fatalf("Expected New, got %s", value)
 	}
 }
