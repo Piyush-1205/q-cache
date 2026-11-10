@@ -629,40 +629,40 @@ func TestEvictionRemovesExpirationSchedule(t *testing.T) {
 
 func TestOversizedReplacementPreservesOldValue(t *testing.T) {
 
-    cache := newTestCacheWithOptions(
-        t,
-        Options{MaxMemoryBytes: 80},
-    )
+	cache := newTestCacheWithOptions(
+		t,
+		Options{MaxMemoryBytes: 80},
+	)
 
-    err := cache.Set("a", []byte("valid"))
+	err := cache.Set("a", []byte("valid"))
 
-    if err != nil {
-        t.Fatal(err)
-    }
+	if err != nil {
+		t.Fatal(err)
+	}
 
-    // This replacement exceeds the entire budget.
-    err = cache.Set("a", []byte("this value is too large"))
+	// This replacement exceeds the entire budget.
+	err = cache.Set("a", []byte("this value is too large"))
 
-    if !errors.Is(err, ErrEntryTooLarge) {
-        t.Fatalf("Expected ErrEntryTooLarge, got %v", err)
-    }
+	if !errors.Is(err, ErrEntryTooLarge) {
+		t.Fatalf("Expected ErrEntryTooLarge, got %v", err)
+	}
 
-    value, exists := cache.Get("a")
+	value, exists := cache.Get("a")
 
-    if !exists || string(value) != "valid" {
-        t.Fatal("Failed replacement should preserve the old value")
-    }
+	if !exists || string(value) != "valid" {
+		t.Fatal("Failed replacement should preserve the old value")
+	}
 }
 
 func TestInvalidMemoryOptions(t *testing.T) {
 
-    _, err := NewWithOptions(
-        Options{
-            MaxMemoryBytes: -1,
-        },
-    )
+	_, err := NewWithOptions(
+		Options{
+			MaxMemoryBytes: -1,
+		},
+	)
 
-    if !errors.Is(err, ErrInvalidMemoryOptions) {
-        t.Fatalf("Expected ErrInvalidMemoryOptions, got %v", err)
-    }
+	if !errors.Is(err, ErrInvalidMemoryOptions) {
+		t.Fatalf("Expected ErrInvalidMemoryOptions, got %v", err)
+	}
 }
