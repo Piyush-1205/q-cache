@@ -31,6 +31,20 @@ func run() error {
 	// Create the HTTP API.
 	handler := api.NewHandler(cache, 1<<20)
 
+	// Configure request admission control.
+	limiter, err := api.NewConcurrencyLimiter(
+		64,
+		128,
+		100*time.Millisecond,
+	)
+
+	if err != nil {
+		return fmt.Errorf("configure concurrency limiter: %w", err)
+	}
+
+	// Wrap all HTTP endpoints with the limiter.
+	handler = limiter.Middleware(handler)
+
 	// Keep the development server local-only for now.
 	const listenAddr = "127.0.0.1:8080"
 
