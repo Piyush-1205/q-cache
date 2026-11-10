@@ -3,11 +3,13 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"testing"
-
 	"qcache/internal/storage"
+	"sync"
+	"testing"
+	"time"
 )
 
 func newTestHandler(t *testing.T, maxBodyBytes int64) http.Handler {
@@ -291,5 +293,129 @@ func TestUnsupportedMethod(t *testing.T) {
 
 	if resp.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("Expected 405, got %d", resp.Code)
+	}
+}
+
+func TestConcurrentHTTPRequests(t *testing.T) {
+
+	cache := storage.New()
+	t.Cleanup(func() {
+		cache.Close()
+	})
+
+	handler := NewHandler(cache, 1<<20)
+
+	// Configure bounded request admission.
+	limiter, err := NewConcurrencyLimiter(
+		8,
+		128,
+		5*time.Second,
+	)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Start an actual HTTP server on a local TCP port.
+	server := httptest.NewServer(
+		limiter.Middleware(handler),
+	)
+	defer server.Close()
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	const totalClients = 100
+
+	var wg sync.WaitGroup
+
+	for i := 0; i < totalClients; i++ {
+
+		wg.Add(1)
+
+		go func(id int) {
+
+			defer wg.Done()
+
+			key := fmt.Sprintf("user:%d", id)
+			expected := []byte(fmt.Sprintf("value-%d", id))
+
+			// PUT request.
+			putReq, err := http.NewRequest(
+				http.MethodPut,
+				server.URL+"/v1/keys/"+key,
+				bytes.NewReader(expected),
+			)
+
+			if err != nil {
+				t.Errorf("Creating PUT request: %v", err)
+				return
+			}
+
+			putResp, err := client.Do(putReq)
+
+			if err != nil {
+				t.Errorf("PUT request failed: %v", err)
+				return
+			}
+
+			putResp.Body.Close()
+
+			if putResp.StatusCode != http.StatusNoContent {
+				t.Errorf(
+					"PUT: expected 204, got %d",
+					putResp.StatusCode,
+				)
+				return
+			}
+
+			// GET request.
+			getResp, err := client.Get(
+				server.URL + "/v1/keys/" + key,
+			)
+
+			if err != nil {
+				t.Errorf("GET request failed: %v", err)
+				return
+			}
+
+			body := new(bytes.Buffer)
+
+			_, readErr := body.ReadFrom(getResp.Body)
+			getResp.Body.Close()
+
+			if readErr != nil {
+				t.Errorf("Reading GET response: %v", readErr)
+				return
+			}
+
+			if getResp.StatusCode != http.StatusOK {
+				t.Errorf(
+					"GET: expected 200, got %d",
+					getResp.StatusCode,
+				)
+				return
+			}
+
+			if !bytes.Equal(body.Bytes(), expected) {
+				t.Errorf(
+					"Unexpected value for %s",
+					key,
+				)
+			}
+
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Every client inserted exactly one unique key.
+	if cache.Len() != totalClients {
+		t.Fatalf(
+			"Expected %d entries, got %d",
+			totalClients,
+			cache.Len(),
+		)
 	}
 }

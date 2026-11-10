@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -232,4 +233,148 @@ func TestLimiterCapsActiveRequests(t *testing.T) {
 		"Maximum simultaneous handlers: %d",
 		maximum.Load(),
 	)
+}
+
+func TestLimiterReleasesQueueOnCancellation(t *testing.T) {
+
+	limiter, err := NewConcurrencyLimiter(
+		1,
+		1,
+		2*time.Second,
+	)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	firstDone := make(chan int, 1)
+
+	baseHandler := http.HandlerFunc(func(
+		w http.ResponseWriter,
+		r *http.Request,
+	) {
+		entered <- struct{}{}
+		<-release
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := limiter.Middleware(baseHandler)
+
+	// Request 1 occupies the only execution slot.
+	go func() {
+
+		req := httptest.NewRequest(
+			http.MethodGet,
+			"/",
+			nil,
+		)
+
+		resp := httptest.NewRecorder()
+
+		handler.ServeHTTP(resp, req)
+
+		firstDone <- resp.Code
+	}()
+
+	<-entered
+
+	// Request 2 is allowed to wait.
+	ctx, cancel := context.WithCancel(context.Background())
+
+	secondReq := httptest.NewRequest(
+		http.MethodGet,
+		"/",
+		nil,
+	).WithContext(ctx)
+
+	secondDone := make(chan struct{})
+
+	go func() {
+
+		resp := httptest.NewRecorder()
+
+		handler.ServeHTTP(resp, secondReq)
+
+		close(secondDone)
+	}()
+
+	// Wait until request 2 actually enters the queue.
+	deadline := time.Now().Add(time.Second)
+
+	for len(limiter.queued) != 1 {
+
+		if time.Now().After(deadline) {
+			cancel()
+			close(release)
+			t.Fatal("Second request never entered the queue")
+		}
+
+		time.Sleep(time.Millisecond)
+	}
+
+	// Simulate client disconnection.
+	cancel()
+
+	select {
+	case <-secondDone:
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("Cancelled request did not return")
+	}
+
+	// The queued position should be released.
+	if len(limiter.queued) != 0 {
+		close(release)
+		t.Fatal("Cancelled request did not release its queue position")
+	}
+
+	// Request 3 should now be able to enter the queue.
+	thirdReq := httptest.NewRequest(
+		http.MethodGet,
+		"/",
+		nil,
+	)
+
+	thirdResp := httptest.NewRecorder()
+	thirdDone := make(chan struct{})
+
+	go func() {
+
+		handler.ServeHTTP(thirdResp, thirdReq)
+
+		close(thirdDone)
+	}()
+
+	deadline = time.Now().Add(time.Second)
+
+	for len(limiter.queued) != 1 {
+
+		if time.Now().After(deadline) {
+			close(release)
+			t.Fatal("Third request could not acquire queue position")
+		}
+
+		time.Sleep(time.Millisecond)
+	}
+
+	// Release request 1. Request 3 should now execute.
+	close(release)
+
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("First request did not finish")
+	}
+
+	select {
+	case <-thirdDone:
+	case <-time.After(time.Second):
+		t.Fatal("Third request did not finish")
+	}
+
+	if thirdResp.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", thirdResp.Code)
+	}
 }
