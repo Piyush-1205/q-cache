@@ -132,7 +132,7 @@ func (c *Cache) expireDueBatch() {
 		}
 
 		if current.expired(now) {
-			delete(c.items, item.key)
+			c.deleteLocked(item.key)
 		}
 	}
 }

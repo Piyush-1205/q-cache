@@ -7,6 +7,11 @@ type entry struct {
 	value     []byte
 	expiresAt time.Time
 	version   uint64
+
+	// Pointer to this entry's position in the LRU list.
+	lruNode *lruNode
+	// Estimated memory consumed by this entry.
+	memoryCost int64
 }
 
 // Checks whether an entry has expired.

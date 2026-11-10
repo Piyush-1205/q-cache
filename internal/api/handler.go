@@ -18,6 +18,8 @@ type cacheStore interface {
 	Delete(key string) bool
 	Exists(key string) bool
 	Len() int
+	MemoryUsage() int64
+	MaxMemory() int64
 }
 
 const defaultMaxBodyBytes int64 = 1 << 20 // 1 MiB
@@ -32,7 +34,9 @@ type errorResponse struct {
 }
 
 type statsResponse struct {
-	Entries int `json:"entries"`
+	Entries         int   `json:"entries"`
+	UsedMemoryBytes int64 `json:"used_memory_bytes"`
+	MaxMemoryBytes  int64 `json:"max_memory_bytes"`
 }
 
 // NewHandler creates the HTTP API handler.
@@ -199,7 +203,9 @@ func (h *Handler) stats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	response := statsResponse{
-		Entries: h.cache.Len(),
+		Entries:         h.cache.Len(),
+		UsedMemoryBytes: h.cache.MemoryUsage(),
+		MaxMemoryBytes:  h.cache.MaxMemory(),
 	}
 
 	_ = json.NewEncoder(w).Encode(response)

@@ -25,7 +25,16 @@ func main() {
 func run() error {
 
 	// Initialize the storage engine.
-	cache := storage.New()
+	cache, err := storage.NewWithOptions(
+		storage.Options{
+			MaxMemoryBytes: 512 << 20, // 512 MiB
+		},
+	)
+
+	if err != nil {
+		return fmt.Errorf("initialize cache: %w", err)
+	}
+
 	defer cache.Close()
 
 	// Create the HTTP API.
