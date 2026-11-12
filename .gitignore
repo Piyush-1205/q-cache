@@ -17,3 +17,6 @@ coverage.out
 # IDE
 .idea/
 .vscode/
+
+# Local development TLS certificates
+/dev-certs/

@@ -49,6 +49,7 @@ func New() *Cache {
 // NewWithOptions creates a cache with configurable memory limits.
 func NewWithOptions(opts Options) (*Cache, error) {
 
+	// Purpose of this step: Don't create a cache with invalid settings.
 	if opts.MaxMemoryBytes < 0 ||
 		opts.EntryOverheadBytes < 0 {
 		return nil, ErrInvalidMemoryOptions
@@ -108,7 +109,6 @@ func (c *Cache) SetWithTTL(
 }
 
 // Shared implementation of Set and SetWithTTL.
-
 func (c *Cache) set(
 	key string,
 	value []byte,
@@ -186,7 +186,7 @@ func (c *Cache) set(
 
 	return nil
 }
-
+ 
 // Removes an expiration schedule.
 // Caller must hold the write lock.
 func (c *Cache) removeExpirationLocked(key string) {
@@ -262,7 +262,7 @@ func (c *Cache) Get(key string) ([]byte, bool) {
 		return nil, false
 	}
 
-	// Lazy expiration.
+	// Lazy expiration. -> why lazy ? -> Because we're removing expired data when someone tries to access it, rather than waiting for the background worker to remove it.
 	if item.expired(time.Now()) {
 
 		c.deleteLocked(key)
